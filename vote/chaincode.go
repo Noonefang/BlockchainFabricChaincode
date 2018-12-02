@@ -72,7 +72,6 @@ func (f *VoteChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 		return f.register(stub, args)
 	case "getState":
 		return f.getState(stub)
-		// todo 测试
 	case "next":
 		return f.changeState(stub, args)
 	case "getCandidates":
@@ -107,17 +106,50 @@ func (f *VoteChaincode) get(stub shim.ChaincodeStubInterface) pb.Response {
 
 func (f *VoteChaincode) getHistory(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	var index string
-	if len(args) > 0 {
+	fmt.Println("string长度是:" + string(len(args[0])))
+	if len(args) > 0 && args[0] != "" {
 		index = args[0]
 	} else {
 		creatorByte, _ := stub.GetCreator()
 		result, _ := stub.GetState(handleByteMd5(creatorByte))
 		index = string(result)
-		fmt.Println("key是:" + index)
 	}
 	history, _ := stub.GetHistoryForKey(index)
-	result, _ := getHistoryListResult(history)
+	result, _ := getHistory(history)
 	return successReslut(result)
+}
+
+func getHistory(resultsIterator shim.HistoryQueryIteratorInterface) ([]byte, error) {
+
+	defer resultsIterator.Close()
+	// buffer is a JSON array containing QueryRecords
+	var buffer bytes.Buffer
+	buffer.WriteString("[")
+
+	bArrayMemberAlreadyWritten := false
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+		// Add a comma before array members, suppress it for the first array member
+		if bArrayMemberAlreadyWritten == true {
+			buffer.WriteString(",")
+		}
+		buffer.Write([]byte("tx_id:"))
+		buffer.Write([]byte(queryResponse.TxId))
+		buffer.WriteString(",")
+		buffer.Write([]byte("value:"))
+		buffer.Write(queryResponse.Value)
+		buffer.WriteString(",")
+		buffer.Write([]byte("timestamp:"))
+		item, _ := json.Marshal(queryResponse.Timestamp)
+		buffer.Write(item)
+		bArrayMemberAlreadyWritten = true
+	}
+	buffer.WriteString("]")
+	fmt.Printf("queryResult:\n%s\n", buffer.String())
+	return buffer.Bytes(), nil
 }
 
 func getHistoryListResult(resultsIterator shim.HistoryQueryIteratorInterface) ([]byte, error) {
@@ -203,7 +235,6 @@ func (f *VoteChaincode) balance(stub shim.ChaincodeStubInterface) pb.Response {
 		cB, _ := stub.GetState(c)
 		p := new(People)
 		json.Unmarshal(cB, p)
-		//todo 如何把字符串转为指针
 		p.Vote = "0"
 		candidateMap[c] = p
 	}
@@ -216,9 +247,6 @@ func (f *VoteChaincode) balance(stub shim.ChaincodeStubInterface) pb.Response {
 		p := new(People)
 		json.Unmarshal(pB, p)
 		if len(p.Vote) != 0 {
-			//todo 或许可以优化
-			//if _,ok:=candidateMap[p.Vote];ok{
-			//	v, _ := strconv.Atoi(candidateMap[p.Vote].Vote)
 			if candidate, ok := candidateMap[p.Vote]; ok {
 				v, _ := strconv.Atoi(candidate.Vote)
 				v++
@@ -291,7 +319,7 @@ func (f *VoteChaincode) register(stub shim.ChaincodeStubInterface, args []string
 	fmt.Println("注册用户")
 	userSigncertByte, _ := stub.GetCreator()
 	founderByte, _ := stub.GetState(Founder)
-	if !bytes.Equal(founderByte, userSigncertByte) {
+	if bytes.Equal(founderByte, userSigncertByte) {
 		return failReslut("见证者不能注册")
 	}
 	userKey := handleByteMd5(userSigncertByte)
